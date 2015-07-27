@@ -151,6 +151,10 @@ SIZE           = $(GCCROOT)avr-size
 # appropriate parameters ("-DLED_START_FLASHES=10") to gcc
 #
 
+ifdef DEBUG_ENABLED
+DEBUG_ENABLED_CMD = -DDEBUG_ENABLED=1
+endif
+
 ifdef BAUD_RATE
 BAUD_RATE_CMD = -DBAUD_RATE=$(BAUD_RATE)
 dummy = FORCE
@@ -192,6 +196,7 @@ endif
 
 COMMON_OPTIONS = $(BAUD_RATE_CMD) $(LED_START_FLASHES_CMD) $(BIGBOOT_CMD)
 COMMON_OPTIONS += $(SOFT_UART_CMD) $(LED_DATA_FLASH_CMD) $(LED_CMD) $(SS_CMD)
+COMMON_OPTIONS += $(DEBUG_ENABLED_CMD)
 
 #UART is handled separately and only passed for devices with more than one.
 ifdef UART
@@ -498,7 +503,7 @@ atmega328_pro8_isp: isp
 include Makefile.extras
 include Makefile.1284
 include Makefile.custom
-
+include Makefile.atmega328_spiflash
 
 #---------------------------------------------------------------------------
 #

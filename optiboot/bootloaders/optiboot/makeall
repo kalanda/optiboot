@@ -17,6 +17,7 @@ make atmega1284
 make atmega32
 make atmega88
 make atmega168p
+make BAUD_RATE=57600 atmega328_spiflash_pro8
 
 #
 # The "big three" standard bootloaders.

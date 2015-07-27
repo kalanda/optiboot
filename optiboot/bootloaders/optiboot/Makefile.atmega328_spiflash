@@ -1,0 +1,43 @@
+atmega328_spiflash:	LIBS = spiflash.c
+atmega328_spiflash:	SPIFLASH_BOOTLOADER = 1
+atmega328_spiflash: TARGET = atmega328_spiflash
+atmega328_spiflash: MCU_TARGET = atmega328p
+atmega328_spiflash: CFLAGS += $(COMMON_OPTIONS) -DSPIFLASH_BOOTLOADER=1
+atmega328_spiflash: AVR_FREQ ?= 16000000L
+# section 7C00 if 512 words boot
+# section 7800 if 1024 words boot
+atmega328_spiflash: LDSECTIONS  = -Wl,--section-start=.text=0x7800 -Wl,--section-start=.version=0x7ffe
+atmega328_spiflash: $(PROGRAM)_atmega328_spiflash.hex
+atmega328_spiflash: $(PROGRAM)_atmega328_spiflash.lst
+
+atmega328_spiflash_isp: atmega328_spiflash
+atmega328_spiflash_isp: TARGET = atmega328_spiflash
+atmega328_spiflash_isp: MCU_TARGET = atmega328p
+# 512 byte boot, SPIEN
+atmega328_spiflash_isp: HFUSE ?= DE
+# Low power xtal (16MHz) 16KCK/14CK+65ms
+atmega328_spiflash_isp: LFUSE ?= FF
+# 2.7V brownout
+atmega328_spiflash_isp: EFUSE ?= FD
+atmega328_spiflash_isp: isp
+
+
+atmega328_spiflash_pro8: TARGET = atmega328_spiflash_pro_8MHz
+atmega328_spiflash_pro8: CHIP = atmega328_spiflash
+atmega328_spiflash_pro8:
+	$(MAKE) $(CHIP) AVR_FREQ=8000000L LED_START_FLASHES=3
+	mv $(PROGRAM)_$(CHIP).hex $(PROGRAM)_$(TARGET).hex
+	mv $(PROGRAM)_$(CHIP).lst $(PROGRAM)_$(TARGET).lst
+
+atmega328_spiflash_pro8_isp: atmega328_spiflash_pro8
+atmega328_spiflash_pro8_isp: TARGET = atmega328_spiflash_pro_8MHz
+atmega328_spiflash_pro8_isp: MCU_TARGET = atmega328p
+# 512 byte boot, SPIEN = DC --> address 0x3E00 --> 0x7C00
+# 1024 byte boot, SPIEN = DA --> address 0x3C00 --> 0x7800
+atmega328_spiflash_pro8_isp: HFUSE ?= DA
+# Low power xtal (16MHz) 16KCK/14CK+65ms
+atmega328_spiflash_pro8_isp: LFUSE ?= FF
+# 2.7V brownout -> 05
+# brownout off -> 07
+atmega328_spiflash_pro8_isp: EFUSE ?= 07
+atmega328_spiflash_pro8_isp: isp

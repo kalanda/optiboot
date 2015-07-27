@@ -267,6 +267,18 @@ optiboot_version = 256*(OPTIBOOT_MAJVER + OPTIBOOT_CUSTOMVER) + OPTIBOOT_MINVER;
  */
 #include "stk500.h"
 
+/*
+ * debug.h contains macros for debug output to console
+ */
+#include "debug.h"
+
+/*
+ * spiflash.h contains functions to operate with spiflash chips
+ */
+#ifdef SPIFLASH_BOOTLOADER
+#include "spiflash.h"
+#endif
+
 #ifndef LED_START_FLASHES
 #define LED_START_FLASHES 0
 #endif
@@ -362,6 +374,10 @@ static inline void writebuffer(int8_t memtype, uint8_t *mybuff,
 static inline void read_mem(uint8_t memtype,
 			    uint16_t address, pagelen_t len);
 
+#ifdef SPIFLASH_BOOTLOADER
+static inline void 	checkFlashImage();
+#endif
+
 #ifdef SOFT_UART
 void uartDelay() __attribute__ ((naked));
 #endif
@@ -436,6 +452,113 @@ void appStart(uint8_t rstFlags) __attribute__ ((naked));
 #define appstart_vec (0)
 #endif // VIRTUAL_BOOT_PARTITION
 
+/**
+ * Look for a valid image at spiflash memory to load
+ */
+#ifdef SPIFLASH_BOOTLOADER
+static inline void checkFlashImage() {
+
+  watchdogConfig(WATCHDOG_OFF);
+  DEBUG('{');
+
+  SPI_INIT;
+
+  // OUTPUTS for FLASH SS
+  FLASHSS_DDR |= _BV(FLASHSS);
+  FLASH_UNSELECT; //unselect FLASH chip
+  SPI_PORT |= _BV(SPI_SS); //set D10 HIGH
+
+  // Warning: if the SS pin ever becomes a LOW INPUT then SPI automatically switches to Slave,
+  // so the data direction of the SS pin MUST be kept as OUTPUT.
+  SPI_ENABLE;
+
+  //read first byte of JEDECID, if chip is present it should return a non-0 and non-FF value
+  FLASH_SELECT;
+  SPI_transfer(SPIFLASH_JEDECID);
+  uint8_t deviceId = SPI_transfer(0);
+  FLASH_UNSELECT;
+
+  DEBUG(deviceId);
+
+  // Return if SPI flash is not present or not available
+  if (deviceId==0 || deviceId==0xFF) return;
+
+  //global unprotect
+  FLASH_command(SPIFLASH_STATUSWRITE, 1);
+  SPI_transfer(0);
+  FLASH_UNSELECT;
+
+  // FLX:XX:XX:FLASH_IMAGE_BYTES_HERE...... (XX = two size bytes)
+  // check if any flash image exists on external FLASH chip
+  if (
+      FLASH_readByte(0)=='F' &&
+      FLASH_readByte(1)=='L' &&
+      FLASH_readByte(2)=='X' &&
+      FLASH_readByte(6)==':' &&
+      FLASH_readByte(9)==':')
+  {
+    DEBUG('F');
+
+    uint16_t imagesize = (FLASH_readByte(7)<<8) | FLASH_readByte(8);
+    if (imagesize%2!=0) return; //basic check that we got even # of bytes
+
+    uint16_t b, i, nextAddress=0;
+
+    LED_PIN |= _BV(LED);
+    for (i=0; i<imagesize; i+=2) {
+
+      DEBUG('*');
+
+      // read 2 bytes (16 bits) from flash image, transfer them to page buffer
+      // flash image starts at position 10 on the external flash memory:
+      // FLX:XX:FLASH_IMAGE_BYTES_HERE...... (XX = two size bytes)
+      b = FLASH_readByte(i+10);
+
+      // bytes are stored big endian on external flash, need to flip the bytes to
+      // little endian for transfer to internal flash
+      b |= FLASH_readByte(i+11) << 8;
+      __boot_page_fill_short((uint16_t)(void*)i,b);
+
+      //when 1 page is full (or we're on the last page), write it to the internal flash memory
+      if ((i+2)%SPM_PAGESIZE==0 || (i+2==imagesize))
+      {
+        __boot_page_erase_short((uint16_t)(void*)nextAddress); //(i+2-SPM_PAGESIZE)
+        boot_spm_busy_wait();
+        // Write from programming buffer
+        __boot_page_write_short((uint16_t)(void*)nextAddress ); //(i+2-SPM_PAGESIZE)
+        boot_spm_busy_wait();
+        nextAddress += SPM_PAGESIZE;
+      }
+    }
+    LED_PIN &= ~_BV(LED);
+
+    #if defined(RWWSRE)
+        // Reenable read access to flash
+        boot_rww_enable();
+    #endif
+
+    DEBUG('E');
+
+    //erase the flash image
+    FLASH_command(SPIFLASH_CHIPERASE, 1);
+    /*SPI_transfer(0);
+    SPI_transfer(0);
+    SPI_transfer(0);*/
+    FLASH_UNSELECT;
+
+    //now trigger a watchdog reset
+    watchdogConfig(WATCHDOG_2S);  // short WDT timeout
+    while (1);                      // and busy-loop so that WD causes a reset and app start
+
+  }
+  else {
+    DEBUG('!');
+  }
+
+  SPI_DISABLE;
+  DEBUG('}');
+}
+#endif
 
 /* main program starts here */
 int main(void) {
@@ -472,8 +595,11 @@ int main(void) {
    */
   ch = MCUSR;
   MCUSR = 0;
+  #ifndef SPIFLASH_BOOTLOADER
   if (ch & (_BV(WDRF) | _BV(BORF) | _BV(PORF)))
       appStart(ch);
+  #endif
+
 
 #if LED_START_FLASHES > 0
   // Set up Timer 1 for timeout counter
@@ -493,6 +619,14 @@ int main(void) {
   UART_SRL = (uint8_t)( (F_CPU + BAUD_RATE * 4L) / (BAUD_RATE * 8L) - 1 );
 #endif
 #endif
+
+  // Check for firmware at spiflash
+  #ifdef SPIFLASH_BOOTLOADER
+  if (!(ch & _BV(EXTRF))) {
+    checkFlashImage();
+    appStart(ch);
+  }
+  #endif
 
   // Set up watchdog to trigger after 1s
   watchdogConfig(WATCHDOG_1S);
