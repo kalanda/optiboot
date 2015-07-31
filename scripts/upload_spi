@@ -1,0 +1,3 @@
+#!/bin/bash
+cd ../optiboot/bootloaders/optiboot
+make BAUD_RATE=57600 DEBUG_ENABLED=1 atmega328_spiflash_pro8_isp
